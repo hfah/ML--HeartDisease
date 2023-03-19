@@ -1,0 +1,609 @@
+---
+title: "Data Science in Healthcare"
+author: "Anna Andreoli, Hossameldin Fahmy, Martina Heidemann"
+date: "10/27/2022"
+output: html_document:
+          code_folding: hide
+          toc: yes
+          toc_depth: 4
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+# Chunk options
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 6,fig.asp = 0.8, fig.align = 'center', out.width = "60%")
+```
+
+# 1. Introduction
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#Load packages and libraries
+
+library(dplyr)
+library(tidyverse)
+library(stringr)
+library(foreign)
+library(haven)
+library(naniar)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(car)
+library(InformationValue)
+library(e1071)
+library(nnet)
+library(PRROC)
+library(ROCR)
+```
+
+## 1.1. The Dataset
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#----import data---
+data <- read_xpt(file ="C:/Users/annaa/OneDrive - Hochschule Luzern/Master Data Science/4 semester/Data Science in Healthcare/LLCP2021.XPT")
+```
+
+### Structure of the dataset
+
+bla bla bla
+```{r}
+str(data)
+```
+
+### Variable selection
+
+Here the list of variables that were selected with the corresponding explanation:
+Ever had CHD or MI(_MICHD) --> Response variable
+General Health(GENHLTH), Number of Days Physical Health Not Good(PHYSHLTH), Number of Days Mental Health Not Good(MENTHLTH), Have any health care coverage(_HLTHPLN), Could Not See Doctor Because of Cost(MEDCOST1), Length of time since last routine checkup(CHECKUP1), Blood Pressure High(BPHIGH6), Ever Diagnosed with a Stoke (CVDSTRK3), Ever Told Have Asthma(ASTHMA3), High Cholesterol(_RFCHOL3), Diabetes (DIABETE4), Arthritis (_DRDXAR3), Kidney (CHCKDNY2), Exercise in Past 30 Days(EXERANY2), Computed body mass index(_BMI5), Obese/Overweight (_RFBMI5), Consume Vegetables (_VEGLT1A),consume fruit(_FRTLT1A), Heavy Alcohol (_RFDRHV7),  Smoker status (_SMOKER3), Respondents Sex(_SEX), Marital Status(MARITAL), Education Level(EDUCA), Employment Status(EMPLOY1), Income Level(_INCOMG1), Race (_RACE), Age category(_AGEG5YR)
+
+
+```{r}
+data_selected <- select(data, c('_MICHD', 'GENHLTH', 'PHYSHLTH', 'MENTHLTH', '_HLTHPLN', 'MEDCOST1', 'CHECKUP1','BPHIGH6','CVDSTRK3','ASTHMA3','_RFCHOL3', 'DIABETE4', '_DRDXAR3', 'CHCKDNY2', 'EXERANY2', '_BMI5', '_RFBMI5', '_VEGLT1A', '_FRTLT1A', '_RFDRHV7', '_SMOKER3', '_SEX', 'MARITAL', 'EDUCA', 'EMPLOY1', '_INCOMG1', '_RACE', '_AGEG5YR' ))
+str(data_selected)
+```
+
+## 1.2. Data Preparation
+
+### Clean variables 
+
+```{r}
+# _MICHD
+#Change 2 to 0 because this means did not have MI or CHD
+data_selected_complete$'_MICHD'[data_selected_complete$'_MICHD' == 2] <- 0
+
+#GENHLTH
+# This is an ordinal variable that we want to keep (1 is Excellent -> 5 is Poor)
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$GENHLTH[data_selected_complete$GENHLTH == 7] <- NA
+data_selected_complete$GENHLTH[data_selected_complete$GENHLTH == 9] <- NA
+
+#MENTHLTH
+# already in days so keep that, scale will be 0-30
+# change 88 to 0 because it means none (no bad mental health days)
+# replace 77 & 99 for refused, dont know to missing
+data_selected_complete$MENTHLTH[data_selected_complete$MENTHLTH == 88] <- 0
+data_selected_complete$MENTHLTH[data_selected_complete$MENTHLTH == 77] <- 0
+data_selected_complete$MENTHLTH[data_selected_complete$MENTHLTH == 99] <- 0
+
+#PHYSHLTH
+# already in days so keep that, scale will be 0-30
+# change 88 to 0 because it means none (no bad physical health days)
+# replace 77 & 99 for refused, dont know to missing
+data_selected_complete$PHYSHLTH[data_selected_complete$PHYSHLTH == 88] <- 0
+data_selected_complete$PHYSHLTH[data_selected_complete$PHYSHLTH == 77] <- NA
+data_selected_complete$PHYSHLTH[data_selected_complete$PHYSHLTH == 99] <- NA
+
+#_HLTHPLN
+# 1 is yes, change 2 to 0 because it is No health care access
+# replace 9 for refused, dont know to missing
+data_selected_complete$'_HLTHPLN'[data_selected_complete$'_HLTHPLN' == 2] <- 0
+data_selected_complete$'_HLTHPLN'[data_selected_complete$'_HLTHPLN' == 9] <- NA
+
+# MEDCOST1
+# Change 2 to 0 for no, 1 is already yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$MEDCOST1[data_selected_complete$MEDCOST1 == 2] <- 0
+data_selected_complete$MEDCOST1[data_selected_complete$MEDCOST1 == 7] <- NA
+data_selected_complete$MEDCOST1[data_selected_complete$MEDCOST1 == 9] <- NA
+
+#CHECKUP1
+# 1 for >=1 year, 2 for 1<year=<2, 3 for 2<year=<5years, 4 for >5years
+# replace 8 to 0 for never had checkup
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$CHECKUP1[data_selected_complete$CHECKUP1 == 8] <- 0
+data_selected_complete$CHECKUP1[data_selected_complete$CHECKUP1 == 7] <- NA
+data_selected_complete$CHECKUP1[data_selected_complete$CHECKUP1 == 9] <- NA
+
+#BPHIGH6
+# Change 2 and 3 to 0 for no, 4 to 1 as yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$BPHIGH6[data_selected_complete$BPHIGH6 == 2] <- 0
+data_selected_complete$BPHIGH6[data_selected_complete$BPHIGH6 == 3] <- 0
+data_selected_complete$BPHIGH6[data_selected_complete$BPHIGH6 == 4] <- 1
+data_selected_complete$BPHIGH6[data_selected_complete$BPHIGH6 == 7] <- NA
+data_selected_complete$BPHIGH6[data_selected_complete$BPHIGH6 == 9] <- NA
+
+#CVDSTRK3
+# Change 2 to 0 for no, 1 is already yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$CVDSTRK3[data_selected_complete$CVDSTRK3 == 2] <- 0
+data_selected_complete$CVDSTRK3[data_selected_complete$CVDSTRK3 == 7] <- NA
+data_selected_complete$CVDSTRK3[data_selected_complete$CVDSTRK3 == 9] <- NA
+
+#ASTHMA3
+# Change 2 to 0 for no, 1 is already yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$ASTHMA3[data_selected_complete$ASTHMA3 == 2] <- 0
+data_selected_complete$ASTHMA3[data_selected_complete$ASTHMA3 == 7] <- NA
+data_selected_complete$ASTHMA3[data_selected_complete$ASTHMA3 == 9] <- NA
+
+#_SMOKER3 - Smoker
+# change 1 & 2 current smoker (everyday or some days) to 1
+# change 3 & 4 former smoker or not at all to 0
+# replace  9 for refused, dont know to missing
+data_selected_complete$'_SMOKER3'[data_selected_complete$'_SMOKER3' == 1] <- 1
+data_selected_complete$'_SMOKER3'[data_selected_complete$'_SMOKER3' == 2] <- 1
+data_selected_complete$'_SMOKER3'[data_selected_complete$'_SMOKER3' == 3] <- 0
+data_selected_complete$'_SMOKER3'[data_selected_complete$'_SMOKER3' == 4] <- 0
+data_selected_complete$'_SMOKER3'[data_selected_complete$'_SMOKER3' == 9] <- NA
+
+#EXERANY2
+# Change 2 to 0 for no, 1 is already yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$EXERANY2[data_selected_complete$EXERANY2 == 2] <- 0
+data_selected_complete$EXERANY2[data_selected_complete$EXERANY2 == 7] <- NA
+data_selected_complete$EXERANY2[data_selected_complete$EXERANY2 == 9] <- NA
+
+#DIABETE4
+#Change 2 and 3 to 0 for no, 4 to 1 as yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$DIABETE4[data_selected_complete$DIABETE4 == 2] <- 0
+data_selected_complete$DIABETE4[data_selected_complete$DIABETE4 == 3] <- 0
+data_selected_complete$DIABETE4[data_selected_complete$DIABETE4 == 4] <- 1
+data_selected_complete$DIABETE4[data_selected_complete$DIABETE4 == 7] <- NA
+data_selected_complete$DIABETE4[data_selected_complete$DIABETE4 == 9] <- NA
+
+#_DRDXAR3
+# Change 2 to 0 for no, 1 is already yes
+data_selected_complete$'_DRDXAR3'[data_selected_complete$'_DRDXAR3' == 2] <- 0
+
+# CHCKDNY2
+# Change 2 to 0 for no, 1 is already yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$CHCKDNY2[data_selected_complete$CHCKDNY2 == 2] <- 0
+data_selected_complete$CHCKDNY2[data_selected_complete$CHCKDNY2 == 7] <- NA
+data_selected_complete$CHCKDNY2[data_selected_complete$CHCKDNY2 == 9] <- NA
+
+#_RFBMI5
+# 1 is yes, change 2 to 0
+# replace 9 for refused, dont know to missing
+data_selected_complete$'_RFBMI5'[data_selected_complete$'_RFBMI5' == 2] <- 0
+data_selected_complete$'_RFBMI5'[data_selected_complete$'_RFBMI5' == 9] <- NA
+
+#_FRTLT1A
+# Change 2 to 0 for no, 1 is already yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$'_FRTLT1A'[data_selected_complete$'_FRTLT1A' == 2] <- 0
+data_selected_complete$'_FRTLT1A'[data_selected_complete$'_FRTLT1A' == 7] <- NA
+data_selected_complete$'_FRTLT1A'[data_selected_complete$'_FRTLT1A' == 9] <- NA
+
+#_VEGLT1A
+# Change 2 to 0 for no, 1 is already yes
+# replace 7 & 9 for refused, dont know to missing
+data_selected_complete$'_VEGLT1A'[data_selected_complete$'_VEGLT1A' == 2] <- 0
+data_selected_complete$'_VEGLT1A'[data_selected_complete$'_VEGLT1A' == 7] <- NA
+data_selected_complete$'_VEGLT1A'[data_selected_complete$'_VEGLT1A' == 9] <- NA
+
+#_RFDRHV7 - Hvy Alcohol
+# Change 1 to 0 for no & 2 to 1 for yes
+# replace 9 for refused, dont know to missing
+data_selected_complete$'_RFDRHV7'[data_selected_complete$'_RFDRHV7' == 1] <- 0
+data_selected_complete$'_RFDRHV7'[data_selected_complete$'_RFDRHV7' == 2] <- 1
+data_selected_complete$'_RFDRHV7'[data_selected_complete$'_RFDRHV7' == 9] <- NA
+
+#_AGEG5YR
+# replace 14 for refused, dont know to missing
+data_selected_complete$'_AGEG5YR'[data_selected_complete$'_AGEG5YR' == 14] <- NA
+
+#_INCOMG1
+# replace 9 for refused, dont know to missing
+data_selected_complete$'_INCOMG1'[data_selected_complete$'_INCOMG1' == 9] <- NA
+
+#EMPLOY1
+# replace 9 for refused, dont know to missing
+data_selected_complete$EDUCA[data_selected_complete$EDUCA == 9] <- NA
+
+#EDUCA
+#replace 9 for refused, dont know to missing
+data_selected_complete$EDUCA[data_selected_complete$EDUCA == 9] <- NA
+
+#MARITAL
+#replace 9 for refused, dont know to missing
+data_selected_complete$MARITAL[data_selected_complete$MARITAL == 9] <- NA
+
+#_SEX
+# Change 2 to 0 for female
+data_selected_complete$'_SEX'[data_selected_complete$'_SEX' == 2] <- 0
+
+#_RACE
+#replace 9 for refused, dont know to missing
+data_selected_complete$'_RACE'[data_selected_complete$'_RACE' == 9] <- NA
+
+#_BMI5
+#no changes, just note that these are BMI * 100
+#So for example a BMI of 4018 is really 40.18
+data_selected_complete$'_BMI5' <- data_selected_complete$'_BMI5'/100
+
+#_RFCHOL3
+# Change 1 to 0 for no & 2 to 1 for yes
+# replace 9 for refused dont know to NA
+data_selected_complete$'_RFCHOL3'[data_selected_complete$'_RFCHOL3' == 1] <- 0
+data_selected_complete$'_RFCHOL3'[data_selected_complete$'_RFCHOL3' == 2] <- 1
+data_selected_complete$'_RFCHOL3'[data_selected_complete$'_RFCHOL3' == 9] <- NA
+```
+
+### Drop Missing Values
+
+```{r}
+sum(is.na(data_selected_complete)) #116263 in all variables
+sum(is.na(data_selected_complete$'_MICHD')) #4635 --> to be dropped as this is our Response Variable
+data_selected_full <- data_selected_complete %>% drop_na(c('_MICHD', 'GENHLTH', 'PHYSHLTH', 'MENTHLTH', '_HLTHPLN', 'MEDCOST1', 'CHECKUP1','BPHIGH6','CVDSTRK3','ASTHMA3','_RFCHOL3', 'DIABETE4', '_DRDXAR3', 'CHCKDNY2', 'EXERANY2', '_BMI5', '_RFBMI5', '_VEGLT1A', '_FRTLT1A', '_RFDRHV7', '_SMOKER3', '_SEX', 'MARITAL', 'EDUCA', 'EMPLOY1', '_INCOMG1', '_RACE', '_AGEG5YR'))
+ 
+colSums(is.na(data_selected_full))
+```
+
+
+### Renaming Variables
+
+```{r}
+data_selected_clean <- data_selected_full %>% 
+  rename('HeartDiseaseorAttack' = '_MICHD', 'BMI' = '_BMI5',
+    'GeneralHealth' = 'GENHLTH',   
+    'MentalHealth' = 'MENTHLTH',  
+    'PhysicalHealth' = 'PHYSHLTH',  
+    'LastCheckup' = 'CHECKUP1',
+    'Stroke' = 'CVDSTRK3',
+    'Asthma' = 'ASTHMA3',
+    'Employment' = 'EMPLOY1',
+    'Education' = 'EDUCA',
+    'Age' = '_AGEG5YR',
+    'Exercise' = 'EXERANY2',
+    'Income' = '_INCOMG1',
+    'Sex' = '_SEX',
+    'Race' = '_RACE',
+    'HealthPlan' = '_HLTHPLN',
+    'HvyAlcoholCons' = '_RFDRHV7',
+    'Smoker' = '_SMOKER3',
+    'Veggies' = '_VEGLT1A',
+    'Fruits' = '_FRTLT1A',
+    'HighChol' = '_RFCHOL3',
+    'HighBP' = 'BPHIGH6',
+    'Diabetic' = 'DIABETE4',
+    'CantAffordMed' = 'MEDCOST1',
+    'MaritalStatus' = 'MARITAL',
+    'Arthritis' = '_DRDXAR3',
+    'Kidney' = 'CHCKDNY2',
+    'Overweight' = '_RFBMI5'
+  )
+```
+
+### Saving as csv
+
+```{r}
+write.csv(data_selected_clean,"C:/Users/annaa/OneDrive - Hochschule Luzern/Master Data Science/4 semester/Data Science in Healthcare/finalDF.csv", row.names = FALSE)
+```
+
+# 2. Exploratory Data Analysis
+
+# 3. Modelling
+
+For the modelling part, different subsets of the original dataset were used:
+- Decision Tree = since this ML model support unprocessed data, we used a larger dataset, containing as many variables as necessary from the original one (only duplicate variables or variables containing a very high number of NAs were deleted). This resulted in a dataset of 126 variables. 
+- Logistic Regression & Neural Network = the exact dataset used above for the EDA was used
+- KNN & SVM = a subset of the clean dataset was chosen, containing 10,000 rows, as the original with more than 400,000 rows was too large to be handled by these models
+
+## 3.1 Decision Tree
+
+```{r}
+#load csv file with reduced number of columns (126) and quick data cleaning
+#check for NAs
+data_full <- read.csv(file ="C:/Users/annaa/OneDrive - Hochschule Luzern/Master Data Science/4 semester/Data Science in Healthcare/dataset_full.csv")
+colSums(is.na(data_full))
+
+# _MICHD
+#Change 2 to 0 because this means did not have MI or CHD
+data_full$X_MICHD[data_full$X_MICHD == 2] <- 0
+data_full_clean <- data_full %>% drop_na('X_MICHD') %>%
+  select(-c(CVDINFR4, CVDCRHD4))
+```
+
+```{r}
+#split train / test datasets
+set.seed(367)
+partition_indexes1 <- createDataPartition(data_full_clean$X_MICHD, times = 1,p = 0.8, 
+                                         list = FALSE)
+train1 <- data_full_clean[partition_indexes1, ]
+test1 <- data_full_clean[-partition_indexes1, ]
+
+#check that both train and split have similar % of response variable
+prop.table(table(train1$X_MICHD))
+prop.table(table(test1$X_MICHD))
+```
+
+Three different decision tree models were fitted with parameter tuning
+
+```{r}
+#first model
+#fit the model
+control1 <- rpart.control(minsplit = 4, minbucket = round(5 / 3), maxdepth = 3, cp = 0)
+fit_tree1 <- rpart(X_MICHD~., data = train1, method = 'class', control = control1)
+rpart.plot(fit_tree1)
+
+#predict
+predict_tree1 <-predict(fit_tree1, test1, type = 'class')
+```
+
+```{r}
+#confusion matrix
+conf.tree1 <- caret::confusionMatrix(as.factor(predict_tree1), as.factor(test1$X_MICHD), positive = "1", mode = "prec_recall")
+conf.tree1
+
+conf.tree1$byClass
+```
+
+```{r}
+#second model
+#fit the model
+control2 <- rpart.control(minsplit = 50, minbucket = round(50 / 5), maxdepth = 5, cp = 0)
+fit_tree2 <- rpart(X_MICHD~., data = train1, method = 'class', control = control2)
+rpart.plot(fit_tree2)
+
+#predict
+predict_tree2 <-predict(fit_tree2, test1, type = 'class')
+```
+
+```{r}
+#confusion matrix
+conf.tree2 <- caret::confusionMatrix(as.factor(predict_tree2), as.factor(test1$X_MICHD), positive = "1", mode = "prec_recall")
+conf.tree2
+conf.tree2$byClass
+```
+
+```{r}
+#third model
+#fit the model
+control3 <- rpart.control(minsplit = 100, minbucket = round(100 / 4), maxdepth = 10, cp = 0)
+fit_tree3 <- rpart(X_MICHD~., data = train1, method = 'class', control = control3)
+rpart.plot(fit_tree3)
+
+#predict
+predict_tree3 <-predict(fit_tree3, test1, type = 'class')
+```
+
+```{r}
+#confusion matrix
+conf.tree3 <- caret::confusionMatrix(as.factor(predict_tree3), as.factor(test1$X_MICHD), positive = "1", mode = "prec_recall")
+conf.tree3
+conf.tree3$byClass
+```
+
+
+CONCLUSION --> the model with the highest recall score is the third with 9.5%
+
+## 3.2 Logistic Regression
+
+```{r}
+#use clean dataset with 28 variables (data_selected_clean)
+data_selected_clean <- read.csv(file ="C:/Users/annaa/OneDrive - Hochschule Luzern/Master Data Science/4 semester/Data Science in Healthcare/finalDF.csv")
+  
+#split train / test datasets
+set.seed(327)
+partition_indexes2 <- createDataPartition(data_selected_clean$HeartDiseaseorAttack, times = 1,p = 0.8, 
+                                         list = FALSE)
+train2 <- data_selected_clean[partition_indexes2, ]
+test2 <- data_selected_clean[-partition_indexes2, ]
+
+#check that both train and split have similar % of response variable
+prop.table(table(train2$HeartDiseaseorAttack))
+prop.table(table(test2$HeartDiseaseorAttack))
+```
+
+```{r}
+#fit the model
+glm.1 <- glm(HeartDiseaseorAttack ~., family = "binomial", data = train2)
+summary(glm.1)
+
+#check for colinearities
+vif(glm.1)
+
+#predict
+predict_glm.1 <- predict(glm.1, test2, type = "response")
+glmTrue <- (test2 == 1)
+```
+
+```{r}
+#confusion matrix
+p.class.glm1 <- ifelse(predict_glm.1 > 0.5, 1, 0)
+conf.glm.1 <- caret::confusionMatrix(as.factor(p.class.glm1), as.factor(test2$HeartDiseaseorAttack), positive = "1", mode = "prec_recall")
+conf.glm.1
+conf.glm.1$byClass
+```
+
+CONCLUSION --> Recall score is 11%
+
+## 3.3 K-nearest neighbors (KNN)
+
+```{r}
+#remove NAs because model cannot handle them
+rows.na <- apply(data_selected_clean, 1, function(x){any(is.na(x))})
+data.no.na <- data_selected_clean[!rows.na, ]
+
+#create smaller balanced dataset (10,000 rows)
+data.no.na$HeartDiseaseorAttack = as.factor(data.no.na$HeartDiseaseorAttack)
+data.zero <- data.no.na %>% filter(HeartDiseaseorAttack == 0)
+data.one <- data.no.na %>% filter(HeartDiseaseorAttack == 1)
+
+data.zero.sub <- data.zero %>% sample_n(5000)
+data.one.sub <- data.one %>% sample_n(5000)
+
+data.subsample <- bind_rows(data.zero.sub, data.one.sub)
+```
+
+```{r}
+#split train / test datasets
+set.seed(123)
+partition_indexes3 <- createDataPartition(data.subsample$HeartDiseaseorAttack, times = 1,p = 0.8, 
+                                          list = FALSE)
+train3 <- data.subsample[partition_indexes3, ]
+test3 <- data.subsample[-partition_indexes3, ]
+
+#check that both train and split have similar % of response variable
+prop.table(table(train3$HeartDiseaseorAttack))
+prop.table(table(test3$HeartDiseaseorAttack))
+```
+
+```{r}
+#center and scale data
+trainX <- predictors_no_NA[,names(predictors_no_NA) != "Direction"]
+train3.1 <- preProcess(x = trainX, method = c("center", "scale"))
+train3.1
+
+#fit the model
+set.seed(400)
+ctrl <- trainControl(method="repeatedcv",repeats = 3) 
+knnFit <- train(HeartDiseaseorAttack ~ ., data = train3, method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+
+#Output of kNN fit
+knnFit
+plot(knnFit)
+```
+
+```{r}
+#predict
+predict_knn <- predict(knnFit,newdata = test3)
+```
+
+```{r}
+#confusion matrix
+conf.knn <- caret::confusionMatrix(as.factor(predict_knn), as.factor(test3$HeartDiseaseorAttack), positive = "1", mode = "prec_recall")
+conf.knn
+conf.knn$byClass
+```
+
+
+## 3.4 Support Vector Machine (SVM)
+
+```{r}
+#use same dataset as per KNN
+#split train / test datasets
+set.seed(321)
+partition_indexes4 <- createDataPartition(data.subsample$HeartDiseaseorAttack, times = 1,p = 0.8, 
+                                          list = FALSE)
+train4 <- data.subsample[partition_indexes4, ]
+test4 <- data.subsample[-partition_indexes4, ]
+
+#check that both train and split have similar % of response variable
+prop.table(table(train4$HeartDiseaseorAttack))
+prop.table(table(test4$HeartDiseaseorAttack))
+```
+
+```{r}
+#fit & predict
+```
+
+```{r}
+#confusion matrix
+conf.svm.1 <- caret::confusionMatrix(as.factor(predict_svm.1), as.factor(test4$HeartDiseaseorAttack), positive = "1", mode = "prec_recall")
+conf.svm.1
+conf.svm.1$byClass
+```
+
+CONCLUSION
+
+## 3.5 Neural Network (NN)
+
+```{r}
+#use entire clean dataset (data_selected_clean)
+#split train / test datasets
+set.seed(123)
+partition_indexes5 <- createDataPartition(data_selected_clean$HeartDiseaseorAttack, times = 1,p = 0.8, 
+                                          list = FALSE)
+train5 <- data_selected_clean[partition_indexes5, ]
+test5 <- data_selected_clean[-partition_indexes5, ]
+```
+
+```{r}
+#fit the first model
+Neural.1 <- nnet(HeartDiseaseorAttack ~ ., data = train5, size=8, maxit=300, 
+                   range=0.5, decay=5e-4)
+
+predict_NN1 <- predict(Neural.1, test5)
+```
+
+```{r}
+#confusion matrix
+p.class.nn1 <- ifelse(predict_NN1 > 0.5, 1, 0)
+conf.nn1 <- caret::confusionMatrix(as.factor(p.class.nn1), as.factor(test5$HeartDiseaseorAttack), positive = "1", mode = "prec_recall")
+conf.nn1
+conf.nn1$byClass
+```
+```{r}
+#fit the second model
+Neural.2 <- nnet(HeartDiseaseorAttack ~ ., data = train5, size=10, maxit=300, 
+                   range=0.5, decay=0.1)
+
+predict_NN2 <- predict(Neural.2, test5)
+```
+
+```{r}
+#confusion matrix
+p.class.nn2 <- ifelse(predict_NN2 > 0.5, 1, 0)
+conf.nn2 <- caret::confusionMatrix(as.factor(p.class.nn2), as.factor(test5$HeartDiseaseorAttack), positive = "1", mode = "prec_recall")
+conf.nn2
+conf.nn2$byClass
+```
+
+```{r}
+#fit the third model
+Neural.3 <- nnet(HeartDiseaseorAttack ~ ., data = train5, size=15, maxit=300, 
+                   range=0.5, decay=0.01)
+
+predict_NN3 <- predict(Neural.3, test5)
+NN3True <- (test5 == 1)
+```
+
+```{r}
+#confusion matrix
+p.class.nn3 <- ifelse(predict_NN3 > 0.5, 1, 0)
+conf.nn3 <- caret::confusionMatrix(as.factor(p.class.nn3), as.factor(test5$HeartDiseaseorAttack), positive = "1", mode = "prec_recall")
+conf.nn3
+conf.nn3$byClass
+```
+
+CONCLUSION
+
+## 3.6 Model Comparison
+
+```{r}
+#PR curve
+
+################
+## Precision-recall curve and AUPRC
+################
+
+rocr.logit <- ROCR::prediction(p.class.glm1, glmTrue[,1])
+rocr.NN3 <- ROCR::prediction(p.class.nn3, NN3True[,1])
+
+AUPRC.logit <- performance(rocr.logit, "aucpr")@y.values[[1]]
+AUPRC.NN3 <- performance(rocr.NN3, "aucpr")@y.values[[1]]
+
+plot(performance(rocr.logit,"prec","rec"),col=2,lwd=2,xlim=c(0.5,1))
+plot(performance(rocr.NN3,"prec","rec"),add=TRUE,col=4,lwd=2,xlim=c(0.5,1))
+legend_text=paste0(c("Logit","NN3")," (AUPRC=",round(c(AUPRC.logit,AUPRC.NN3),digits=3),")")
+legend("bottomleft",bty="n",legend=legend_text,col=c(2,4,"darkgreen"),lwd=2)
+```
+                                  
+
+
